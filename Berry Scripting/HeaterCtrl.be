@@ -10,15 +10,20 @@ import json
 
 
 class HeaterCtrl : Driver
-  var counter
-  var CounterSum
-  var SP_Modulation
+    var counter
+    var CounterSum
+    var SP_Modulation
+    var SP_Heizer
+    var TempDS #Temperature from DS18B20 over MQTT (Sensor)
+    var PowerHeater #Leistung des Heizers in W
   
   
   def init()
     self.counter = 0;    #- initialize the counter -#
     self.CounterSum = 0;
-    self.SP_Modulation = -1.0;
+    self.SP_Modulation = 0.0;
+    self.SP_Heizer = 0.0;
+    self.PowerHeater = 1500; #W
          
     # register fast_loop method
     tasmota.add_fast_loop(def () self.fast_loop() end)
@@ -33,26 +38,17 @@ class HeaterCtrl : Driver
     #- display the counter in its own line -#
     import string
     var msg = string.format(
-      "{s}Counter{m}%.f {e}"..
-      "{s}PowerSP{m}%.1f W{e}", #..
-      self.counter, self.SP_Modulation)
+        "{s}SP_Modulation{m}%.f %%{e}"..
+        "{s}SP_Heizer{m}%.1f W{e}"..
+        "{s}Temperatur{m}%.1f °C{e}", #..
+        self.SP_Modulation, self.SP_Heizer, self.TempDS)
     tasmota.web_send_decimal(msg)
   end
 
-
-  #- display button for Increase Counter and trigger 'incr_counter=1' when pressed -#
-#-  def web_add_main_button()
-    webserver.content_send("<p></p><button onclick='la(\"&incr_counter=1\");'>Increment Counter</button> <p></p><button onclick='la(\"&decr_counter=1\");'>Decrement Counter</button> <p></p><button onclick='la(\"&restart_subscribe=1\");'>restart_subscribe</button>")
-  end
--#
-
   def webUpdate()
     import string
-    #webserver.content_send(string.format("{s}Counter{m}%i{e} \n {s}PowerSP{m}%i{e}", self.counter, self.SP_Modulation))
-   
     print("webupdate...")
   end
-
 
   #subscribe mqtt
   def mqtt_subscribe()
@@ -76,18 +72,18 @@ class HeaterCtrl : Driver
 
   # Event was die Daten vom subscribe ausließt
   def mqtt_data(topic, idx, payload_s, payload_b)
-    print("topic: ", topic)
-    print("payload: ", payload_s)
+    #print("topic: ", topic)
+    #print("payload: ", payload_s)
 
-    if topic == 'cmnd/tasmota_Heater/POWER' #hier muss der richtige ESP32 ausgewählt werden
-      print('try to subscribed!')
-      self.mqtt_subscribe()
-    end
+    #if topic == 'cmnd/tasmota_Heater/POWER' #hier muss der richtige ESP32 ausgewählt werden
+    #  print('try to subscribed!')
+    #  self.mqtt_subscribe()
+    #end
 
     var sensors = json.load(payload_s)
-    self.SP_Modulation = real(sensors['GridV'])
-    print("SP_Modulation: ", self.SP_Modulation)
-    #sensors['GridV']
+    self.SP_Heizer = real(sensors['SP_Heizer']) #read sensor data
+    #print("SP_Heizer: ", self.SP_Heizer) #debug
+    self.SP_Modulation = self.SP_Heizer / (self.PowerHeater / 100.0)  #calculate the PFM value -> 2500 W = 100 %
 
     return true
   end
@@ -118,7 +114,12 @@ class HeaterCtrl : Driver
   def fast_loop()
     # called at each iteration, and needs to be registered separately and explicitly
     if !self.PFM_Generator return nil end
-    self.PFM_Generator(self.SP_Modulation);
+      if self.SP_Heizer <= -10.0 # Leistungen größer 10 W
+        self.PFM_Generator(self.SP_Modulation * -1.0);
+        #print("SP_Mod: ", self.SP_Modulation)
+    else
+      self.PFM_Generator(0);
+    end
   end
 
 end
@@ -127,4 +128,3 @@ end
 #- *************************************** -#
 tasmota.add_driver(HeaterCtrl())                 # register driver
 tasmota.add_fast_loop(HeaterCtrl.fast_loop())    # register a closure to capture the instance of the class as well as the method
-
