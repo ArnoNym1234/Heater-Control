@@ -13,17 +13,20 @@ class HeaterCtrl : Driver
     var counter
     var CounterSum
     var SP_Modulation
-    var SP_Heizer
+    var SP_Heater
+    var SP_HeaterPower_Limit
     var TempDS #Temperature from DS18B20 over MQTT (Sensor)
-    var PowerHeater #Leistung des Heizers in W
+    var HeaterPower #Leistung des Heizers in W
   
   
   def init()
     self.counter = 0;    #- initialize the counter -#
     self.CounterSum = 0;
     self.SP_Modulation = 0.0;
-    self.SP_Heizer = 0.0;
-    self.PowerHeater = 1500; #W
+    self.SP_Heater = 0.0;
+    self.HeaterPower = 1500; #W
+    self.SP_HeaterPower_Limit = 1400; #Leistungsbegrenzung für Heizer in W
+
          
     # register fast_loop method
     tasmota.add_fast_loop(def () self.fast_loop() end)
@@ -39,9 +42,9 @@ class HeaterCtrl : Driver
     import string
     var msg = string.format(
         "{s}SP_Modulation{m}%.f %%{e}"..
-        "{s}SP_Heizer{m}%.1f W{e}"..
+        "{s}SP_Heater{m}%.1f W{e}"..
         "{s}Temperatur{m}%.1f °C{e}", #..
-        self.SP_Modulation, self.SP_Heizer, self.TempDS)
+        self.SP_Modulation, self.SP_Heater, self.TempDS)
     tasmota.web_send_decimal(msg)
   end
 
@@ -81,9 +84,15 @@ class HeaterCtrl : Driver
     #end
 
     var sensors = json.load(payload_s)
-    self.SP_Heizer = real(sensors['SP_Heizer']) #read sensor data
-    #print("SP_Heizer: ", self.SP_Heizer) #debug
-    self.SP_Modulation = self.SP_Heizer / (self.PowerHeater / 100.0)  #calculate the PFM value -> 2500 W = 100 %
+    self.SP_Heater = real(sensors['SP_Heater']) #read sensor data
+
+    if self.SP_Heater > self.SP_HeaterPower_Limit #Limit setpoint HeaterPower
+        self.SP_Heater = self.SP_HeaterPower_Limit
+    end
+    
+    #print("SP_Heater: ", self.SP_Heater) #debug
+
+    self.SP_Modulation = self.SP_Heater / (self.HeaterPower / 100.0)  #calculate the PFM value -> 2500 W = 100 %
 
     return true
   end
@@ -114,7 +123,7 @@ class HeaterCtrl : Driver
   def fast_loop()
     # called at each iteration, and needs to be registered separately and explicitly
     if !self.PFM_Generator return nil end
-      if self.SP_Heizer <= -10.0 # Leistungen größer 10 W
+      if self.SP_Heater <= -10.0 # Leistungen größer 10 W
         self.PFM_Generator(self.SP_Modulation * -1.0);
         #print("SP_Mod: ", self.SP_Modulation)
     else
